@@ -48,7 +48,7 @@ export const AI_LEVELS: Record<AILevel, AILevelConfig> = {
     chainCaptureAware: true,
     revivalAware: false,
     drawAware: false,
-    randomFactor: 0.1
+    randomFactor: 0.25
   },
   4: {
     name: '中级',
@@ -60,7 +60,7 @@ export const AI_LEVELS: Record<AILevel, AILevelConfig> = {
     chainCaptureAware: true,
     revivalAware: true,
     drawAware: false,
-    randomFactor: 0.05
+    randomFactor: 0.26
   },
   5: {
     name: '高级',
@@ -72,13 +72,13 @@ export const AI_LEVELS: Record<AILevel, AILevelConfig> = {
     chainCaptureAware: true,
     revivalAware: true,
     drawAware: true,
-    randomFactor: 0.02
+    randomFactor: 0.27
   },
   6: {
     name: '大师',
     description: '完全掌握规则，最优策略',
     depth: 5,
-    thinkingTime: 170,
+    thinkingTime: 150,
     evaluationType: 'master',
     moveOrdering: true,
     chainCaptureAware: true,
