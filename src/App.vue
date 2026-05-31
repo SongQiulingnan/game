@@ -18,6 +18,10 @@ const {
   aiEnabled,
   aiPlayer,
   aiLevel,
+  aiVsAiMode,
+  aiVsAiSpeed,
+  aiBlackLevel,
+  aiWhiteLevel,
   blackBoardCount,
   whiteBoardCount,
   statusText,
@@ -31,6 +35,10 @@ const {
   toggleAI,
   switchAIPlayer,
   changeAILevel,
+  toggleAiVsAi,
+  setAiBlackLevel,
+  setAiWhiteLevel,
+  setAiVsAiSpeed,
   adj,
   lines,
   allPoints,
@@ -87,13 +95,21 @@ function toggleRules() {
           :ai-level="aiLevel"
           :current-a-i-config="currentAIConfig"
           :AI_LEVELS="AI_LEVELS"
+          :ai-vs-ai-mode="aiVsAiMode"
+          :ai-vs-ai-speed="aiVsAiSpeed"
+          :ai-black-level="aiBlackLevel"
+          :ai-white-level="aiWhiteLevel"
           :actions="{
             reset: initGame,
             toggleMoveMode: toggleMoveMode,
             toggleRules: toggleRules,
             toggleAI: toggleAI,
             switchAIPlayer: switchAIPlayer,
-            changeAILevel: changeAILevel
+            changeAILevel: changeAILevel,
+            toggleAiVsAi: toggleAiVsAi,
+            setAiBlackLevel: setAiBlackLevel,
+            setAiWhiteLevel: setAiWhiteLevel,
+            setAiVsAiSpeed: setAiVsAiSpeed
           }"
         />
       </div>

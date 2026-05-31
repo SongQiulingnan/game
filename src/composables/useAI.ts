@@ -10,76 +10,93 @@ import {
   executeCapturesWithChain,
   checkCapture,
   checkWinCondition,
+  getCaptureThreats,
+  getPickThreats,
+  getTrapThreats,
+  getChainOpportunities,
+  orderMovesByThreat,
 } from '../utils/board'
 import type { Ref } from 'vue'
 
 export const AI_LEVELS: Record<AILevel, AILevelConfig> = {
   1: {
     name: '新手',
-    description: '随机出招，适合初学者',
+    description: '几乎乱下，很容易输',
     depth: 0,
-    thinkingTime: 20,
+    thinkingTime: 10,
     evaluationType: 'random',
     moveOrdering: false,
-    chainCaptureAware: false,
-    revivalAware: false,
-    drawAware: false,
+    chainCaptureAware: true,
+    revivalAware: true,
+    drawAware: true,
     randomFactor: 1.0
   },
   2: {
     name: '入门',
-    description: '贪心策略，优先吃子',
+    description: '只会看眼前，经常失误',
     depth: 1,
-    thinkingTime: 30,
+    thinkingTime: 15,
     evaluationType: 'greedy',
     moveOrdering: false,
-    chainCaptureAware: false,
-    revivalAware: false,
-    drawAware: false,
-    randomFactor: 0.3
+    chainCaptureAware: true,
+    revivalAware: true,
+    drawAware: true,
+    randomFactor: 0.5
   },
   3: {
     name: '初级',
-    description: '浅层搜索，理解基本规则',
+    description: '能预判一步，偶尔犯错',
     depth: 2,
-    thinkingTime: 50,
+    thinkingTime: 20,
     evaluationType: 'basic',
     moveOrdering: true,
     chainCaptureAware: true,
-    revivalAware: false,
-    drawAware: false,
-    randomFactor: 0.25
+    revivalAware: true,
+    drawAware: true,
+    randomFactor: 0.35
   },
   4: {
     name: '中级',
-    description: '标准搜索，掌握连环吃子',
+    description: '能预判两三步，较少失误',
     depth: 3,
-    thinkingTime: 80,
+    thinkingTime: 30,
     evaluationType: 'standard',
     moveOrdering: true,
     chainCaptureAware: true,
     revivalAware: true,
-    drawAware: false,
-    randomFactor: 0.26
+    drawAware: true,
+    randomFactor: 0.2
   },
   5: {
     name: '高级',
-    description: '深层搜索，预判多步',
+    description: '攻防兼备，很少犯错',
     depth: 4,
-    thinkingTime: 120,
+    thinkingTime: 50,
     evaluationType: 'advanced',
     moveOrdering: true,
     chainCaptureAware: true,
     revivalAware: true,
     drawAware: true,
-    randomFactor: 0.27
+    randomFactor: 0.1
   },
   6: {
     name: '大师',
-    description: '完全掌握规则，最优策略',
+    description: '深谋远虑，几乎不犯错',
     depth: 5,
-    thinkingTime: 150,
+    thinkingTime: 80,
     evaluationType: 'master',
+    moveOrdering: true,
+    chainCaptureAware: true,
+    revivalAware: true,
+    drawAware: true,
+    randomFactor: 0
+  },
+  7: {
+    name: '宗师',
+    description: '战术大师，主动制造威胁',
+    depth: 6,
+    thinkingTime: 120,
+    evaluationType: 'threat',
     moveOrdering: true,
     chainCaptureAware: true,
     revivalAware: true,
@@ -106,8 +123,54 @@ export function useAI(
   // 兼容旧的aiDepth
   const aiDepth = ref(3)
 
+  // 置换表
+  const transpositionTable = new Map<string, { 
+    score: number, 
+    depth: number, 
+    flag: 'exact' | 'lower' | 'upper' 
+  }>()
+
+  // AI走法历史记录 - 记录每个位置被下的次数
+  const aiMoveHistory = ref<Map<string, number>>(new Map())
+  
+  // AI棋子移动记录 - 记录每个棋子被移动的次数
+  const aiPieceMoveCount = ref<Map<string, number>>(new Map())
+
   function getConfig(): AILevelConfig {
     return AI_LEVELS[aiLevel.value]
+  }
+
+  // 置换表查找
+  function lookupTranspositionTable(
+    hash: string, 
+    depth: number, 
+    alpha: number, 
+    beta: number
+  ): number | null {
+    const entry = transpositionTable.get(hash)
+    if (!entry || entry.depth < depth) return null
+    
+    if (entry.flag === 'exact') return entry.score
+    if (entry.flag === 'lower' && entry.score >= beta) return entry.score
+    if (entry.flag === 'upper' && entry.score <= alpha) return entry.score
+    
+    return null
+  }
+
+  // 置换表存储
+  function storeTranspositionTable(
+    hash: string, 
+    depth: number, 
+    score: number, 
+    flag: 'exact' | 'lower' | 'upper'
+  ) {
+    transpositionTable.set(hash, { score, depth, flag })
+  }
+
+  // 生成局面哈希
+  function getBoardHash(stateBoard: BoardState, player: PieceColor): string {
+    const keys = Object.keys(stateBoard).sort()
+    return keys.map(k => `${k}:${stateBoard[k]}`).join('|') + `|turn:${player}`
   }
 
   // 随机评估函数
@@ -145,8 +208,8 @@ export function useAI(
     const myReserve = stateReserves[player]
     const enemyReserve = stateReserves[enemy]
 
-    let score = (myBoard - enemyBoard) * 120
-    score += (myReserve - enemyReserve) * 60
+    let score = (myBoard - enemyBoard) * 150
+    score += (myReserve - enemyReserve) * 80
 
     // 位置价值
     for (const k in stateBoard) {
@@ -210,8 +273,8 @@ export function useAI(
     const myReserve = stateReserves[player]
     const enemyReserve = stateReserves[enemy]
 
-    let score = (myBoard - enemyBoard) * 120
-    score += (myReserve - enemyReserve) * 60
+    let score = (myBoard - enemyBoard) * 150
+    score += (myReserve - enemyReserve) * 80
 
     // 位置价值
     for (const k in stateBoard) {
@@ -370,6 +433,70 @@ export function useAI(
     return score
   }
 
+  // 威胁评估函数
+  function evaluateThreat(player: PieceColor, stateBoard: BoardState, stateReserves: Reserves): number {
+    let score = evaluateMaster(player, stateBoard, stateReserves)
+
+    const enemy = player === 'black' ? 'white' : 'black'
+
+    // 1. 识别夹吃威胁
+    const captureThreats = getCaptureThreats(player, stateBoard, lines, adj)
+    score += captureThreats.length * 200
+
+    // 2. 识别挑吃威胁
+    const pickThreats = getPickThreats(player, stateBoard, lines, adj)
+    score += pickThreats.length * 300
+
+    // 3. 识别围困威胁
+    const trapThreats = getTrapThreats(player, stateBoard, adj)
+    score += trapThreats.length * 150
+
+    // 4. 识别连环吃子机会
+    const chainOpportunities = getChainOpportunities(player, stateBoard, lines, adj)
+    score += chainOpportunities.length * 250
+
+    // 5. 防守威胁
+    const enemyCaptureThreats = getCaptureThreats(enemy, stateBoard, lines, adj)
+    score -= enemyCaptureThreats.length * 180
+
+    const enemyPickThreats = getPickThreats(enemy, stateBoard, lines, adj)
+    score -= enemyPickThreats.length * 280
+
+    // 6. 战术组合 - 同时形成多种威胁
+    if (captureThreats.length >= 2 && pickThreats.length >= 1) {
+      score += 500 // 多重威胁加分
+    }
+
+    // 7. 优先选择能形成威胁的位置
+    for (const k in stateBoard) {
+      if (stateBoard[k] !== player) continue
+      const pos = getPointFromKey(k)
+      const neighbors = adj[getKey(pos)] || []
+      
+      // 检查周围是否有威胁机会
+      for (const n of neighbors) {
+        if (!stateBoard[getKey(n)]) {
+          // 空位可能是威胁位置
+          const testBoard = { ...stateBoard }
+          testBoard[getKey(n)] = player
+          delete testBoard[getKey(pos)]
+          
+          const newCaptureThreats = getCaptureThreats(player, testBoard, lines, adj)
+          const newPickThreats = getPickThreats(player, testBoard, lines, adj)
+          
+          if (newCaptureThreats.length > captureThreats.length) {
+            score += 50 // 鼓励移动到能形成威胁的位置
+          }
+          if (newPickThreats.length > pickThreats.length) {
+            score += 80 // 鼓励移动到能形成挑吃威胁的位置
+          }
+        }
+      }
+    }
+
+    return score
+  }
+
   // 根据配置选择评估函数
   function evaluateBoard(player: PieceColor, stateBoard: BoardState, stateReserves: Reserves): number {
     const config = getConfig()
@@ -387,6 +514,8 @@ export function useAI(
         return evaluateAdvanced(player, stateBoard, stateReserves)
       case 'master':
         return evaluateMaster(player, stateBoard, stateReserves)
+      case 'threat':
+        return evaluateThreat(player, stateBoard, stateReserves)
       default:
         return evaluateStandard(player, stateBoard, stateReserves)
     }
@@ -400,6 +529,13 @@ export function useAI(
       const targets = getValidMoves(from, stateBoard, moveMode.value, adj, lines)
       for (const to of targets) moves.push({ from, to })
     }
+    
+    // 走法威胁排序
+    const config = getConfig()
+    if (config.moveOrdering) {
+      return orderMovesByThreat(moves, player, stateBoard, lines, adj)
+    }
+    
     return moves
   }
 
@@ -467,11 +603,16 @@ export function useAI(
     stateBoard: BoardState,
     stateReserves: Reserves
   ): number {
+    // 置换表查找
+    const hash = getBoardHash(stateBoard, maximizingPlayer ? player : (player === 'black' ? 'white' : 'black'))
+    const cached = lookupTranspositionTable(hash, depth, alpha, beta)
+    if (cached !== null) return cached
+
     const enemy = player === 'black' ? 'white' : 'black'
     const current = maximizingPlayer ? player : enemy
 
     const currentEnemy = current === player ? enemy : player
-    if (checkWinCondition(currentEnemy, stateBoard, adj)) {
+    if (checkWinCondition(currentEnemy, stateBoard, adj, lines)) {
       return maximizingPlayer ? -9000 : 9000
     }
     if (!hasValidMoves(current, stateBoard, moveMode.value, adj, lines) && countBoardPieces(stateBoard, current) > 0) {
@@ -497,6 +638,8 @@ export function useAI(
       })
     }
 
+    let result: number
+    
     if (maximizingPlayer) {
       let maxEval = -Infinity
       for (const move of moves) {
@@ -506,7 +649,7 @@ export function useAI(
         alpha = Math.max(alpha, evalScore)
         if (beta <= alpha) break
       }
-      return maxEval
+      result = maxEval
     } else {
       let minEval = Infinity
       for (const move of moves) {
@@ -516,15 +659,45 @@ export function useAI(
         beta = Math.min(beta, evalScore)
         if (beta <= alpha) break
       }
-      return minEval
+      result = minEval
     }
+    
+    // 置换表存储
+    if (result <= alpha) {
+      storeTranspositionTable(hash, depth, result, 'upper')
+    } else if (result >= beta) {
+      storeTranspositionTable(hash, depth, result, 'lower')
+    } else {
+      storeTranspositionTable(hash, depth, result, 'exact')
+    }
+    
+    return result
   }
 
   function findBestMove(player: PieceColor): Move | null {
-    const moves = getAllValidMoves(player, board.value)
+    let moves = getAllValidMoves(player, board.value)
     if (moves.length === 0) return null
 
     const config = getConfig()
+
+    // 过滤掉重复超过2次的走法（除非只剩这些走法）
+    const filteredMoves = moves.filter(move => {
+      const moveKey = `${getKey(move.from)}->${getKey(move.to)}`
+      const count = aiMoveHistory.value.get(moveKey) || 0
+      return count < 2
+    })
+    
+    // 如果过滤后还有走法，使用过滤后的；否则使用原始走法
+    if (filteredMoves.length > 0) {
+      moves = filteredMoves
+    }
+    
+    // 优先选择移动次数少的棋子（避免一直下一个棋子）
+    moves.sort((a, b) => {
+      const countA = aiPieceMoveCount.value.get(getKey(a.from)) || 0
+      const countB = aiPieceMoveCount.value.get(getKey(b.from)) || 0
+      return countA - countB
+    })
 
     // 新手等级 - 随机选择
     if (config.evaluationType === 'random') {
@@ -556,7 +729,21 @@ export function useAI(
       return moves[Math.floor(Math.random() * moves.length)]
     }
 
-    // 使用minimax搜索
+    // 使用迭代加深搜索
+    return iterativeDeepening(player, config.thinkingTime)
+  }
+
+  // 迭代加深搜索
+  function iterativeDeepening(player: PieceColor, timeLimit: number): Move | null {
+    const startTime = Date.now()
+    let bestMove: Move | null = null
+    const moves = getAllValidMoves(player, board.value)
+    
+    if (moves.length === 0) return null
+
+    const config = getConfig()
+    
+    // 走法排序 - 优先考虑吃子走法
     if (config.moveOrdering) {
       moves.sort((a, b) => {
         const simA = simulateMoveOnState(a, player, board.value, reserves.value)
@@ -568,20 +755,42 @@ export function useAI(
       })
     }
 
-    let bestMove: Move | null = null
-    let bestScore = -Infinity
-
+    // 检查是否有吃子走法
+    let hasCaptureMove = false
     for (const move of moves) {
-      const { newBoard, newReserves } = simulateMoveOnState(move, player, board.value, reserves.value)
-      const score = minimax(config.depth - 1, -Infinity, Infinity, false, player, newBoard, newReserves)
-      if (score > bestScore) {
-        bestScore = score
-        bestMove = move
+      const { captureCount } = simulateMoveOnState(move, player, board.value, reserves.value)
+      if (captureCount > 0) {
+        hasCaptureMove = true
+        break
       }
     }
 
-    // 添加随机因素
-    if (config.randomFactor > 0 && Math.random() < config.randomFactor) {
+    // 迭代加深
+    for (let depth = 1; depth <= config.depth; depth++) {
+      let currentBestMove: Move | null = null
+      let bestScore = -Infinity
+
+      for (const move of moves) {
+        const { newBoard, newReserves } = simulateMoveOnState(move, player, board.value, reserves.value)
+        const score = minimax(depth - 1, -Infinity, Infinity, false, player, newBoard, newReserves)
+        if (score > bestScore) {
+          bestScore = score
+          currentBestMove = move
+        }
+      }
+
+      if (currentBestMove) {
+        bestMove = currentBestMove
+      }
+
+      // 检查时间限制
+      if (Date.now() - startTime > timeLimit) {
+        break
+      }
+    }
+
+    // 只有在没有吃子走法时才添加随机因素
+    if (!hasCaptureMove && config.randomFactor > 0 && Math.random() < config.randomFactor) {
       const randomMove = moves[Math.floor(Math.random() * moves.length)]
       return randomMove
     }
@@ -619,14 +828,8 @@ export function useAI(
 
       let score = evaluateBoard(aiPlayer.value, testBoard, testReserves)
       
-      // 检查是否可以吃子
-      if (config.chainCaptureAware) {
-        const chainResult = executeCapturesWithChain(pt, aiPlayer.value, testBoard, testReserves, lines)
-        if (chainResult.capturedCount > 0) score += 250
-      } else {
-        const captures = checkCapture(pt, aiPlayer.value, testBoard, lines)
-        if (captures.length > 0) score += 250
-      }
+      // 复活时不允许吃子，移除吃子加分逻辑
+      // 位置评估仍然有效，但吃子能力不影响选择
       
       if (POSITION_VALUES[k]) score += POSITION_VALUES[k] * 0.5
 
@@ -682,6 +885,15 @@ export function useAI(
     board.value[toK] = aiPlayer.value
     delete board.value[fromK]
 
+    // 记录走法历史
+    const moveKey = `${fromK}->${toK}`
+    const currentCount = aiMoveHistory.value.get(moveKey) || 0
+    aiMoveHistory.value.set(moveKey, currentCount + 1)
+    
+    // 记录棋子移动次数
+    const pieceCount = aiPieceMoveCount.value.get(fromK) || 0
+    aiPieceMoveCount.value.set(fromK, pieceCount + 1)
+
     if (config.chainCaptureAware) {
       executeCapturesWithChain(
         move.to, 
@@ -721,6 +933,11 @@ export function useAI(
     aiDepth.value = AI_LEVELS[level].depth
   }
 
+  function resetMoveHistory() {
+    aiMoveHistory.value.clear()
+    aiPieceMoveCount.value.clear()
+  }
+
   return {
     aiEnabled,
     aiPlayer,
@@ -733,5 +950,6 @@ export function useAI(
     handleAIRevival,
     findBestMove,
     setAILevel,
+    resetMoveHistory,
   }
 }

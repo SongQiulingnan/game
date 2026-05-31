@@ -38,9 +38,9 @@ export interface Capture {
   points: Point[]
 }
 
-export type AILevel = 1 | 2 | 3 | 4 | 5 | 6
+export type AILevel = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
-export type AIEvaluationType = 'random' | 'greedy' | 'basic' | 'standard' | 'advanced' | 'master'
+export type AIEvaluationType = 'random' | 'greedy' | 'basic' | 'standard' | 'advanced' | 'master' | 'threat'
 
 export interface AILevelConfig {
   name: string
