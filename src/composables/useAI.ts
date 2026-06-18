@@ -167,10 +167,14 @@ export function useAI(
     transpositionTable.set(hash, { score, depth, flag })
   }
 
-  // 生成局面哈希
-  function getBoardHash(stateBoard: BoardState, player: PieceColor): string {
+  // 生成局面哈希（包含reserves确保不同储备量的局面不冲突）
+  function getBoardHash(stateBoard: BoardState, player: PieceColor, stateReserves?: Reserves): string {
     const keys = Object.keys(stateBoard).sort()
-    return keys.map(k => `${k}:${stateBoard[k]}`).join('|') + `|turn:${player}`
+    let hash = keys.map(k => `${k}:${stateBoard[k]}`).join('|') + `|turn:${player}`
+    if (stateReserves) {
+      hash += `|res:${stateReserves.black},${stateReserves.white}`
+    }
+    return hash
   }
 
   // 随机评估函数
@@ -352,10 +356,10 @@ export function useAI(
   function evaluateAdvanced(player: PieceColor, stateBoard: BoardState, stateReserves: Reserves): number {
     let score = evaluateStandard(player, stateBoard, stateReserves)
 
-    // 惩罚重复局面
+    // 惩罚重复局面 — 使用完整哈希精确匹配（避免 startsWith 误匹配）
     if (boardHistory && boardHistory.value.length > 0) {
-      const currentHash = Object.keys(stateBoard).sort().map(k => `${k}:${stateBoard[k]}`).join('|')
-      const repeatCount = boardHistory.value.filter(h => h.startsWith(currentHash)).length
+      const currentHash = getBoardHash(stateBoard, player, stateReserves)
+      const repeatCount = boardHistory.value.filter(h => h === currentHash).length
       if (repeatCount > 0) {
         score -= repeatCount * 50
       }
@@ -409,10 +413,10 @@ export function useAI(
       }
     }
 
-    // 平局意识 - 避免重复局面
+    // 平局意识 - 避免重复局面（使用完整哈希精确匹配）
     if (boardHistory && boardHistory.value.length > 0) {
-      const currentHash = Object.keys(stateBoard).sort().map(k => `${k}:${stateBoard[k]}`).join('|')
-      const repeatCount = boardHistory.value.filter(h => h.startsWith(currentHash)).length
+      const currentHash = getBoardHash(stateBoard, player, stateReserves)
+      const repeatCount = boardHistory.value.filter(h => h === currentHash).length
       if (repeatCount >= 2) {
         score -= 200 // 严重惩罚即将平局的局面
       }
@@ -603,8 +607,8 @@ export function useAI(
     stateBoard: BoardState,
     stateReserves: Reserves
   ): number {
-    // 置换表查找
-    const hash = getBoardHash(stateBoard, maximizingPlayer ? player : (player === 'black' ? 'white' : 'black'))
+    // 置换表查找（包含reserves确保不同储备量的局面不碰撞）
+    const hash = getBoardHash(stateBoard, maximizingPlayer ? player : (player === 'black' ? 'white' : 'black'), stateReserves)
     const cached = lookupTranspositionTable(hash, depth, alpha, beta)
     if (cached !== null) return cached
 
@@ -680,19 +684,29 @@ export function useAI(
 
     const config = getConfig()
 
-    // 过滤掉重复超过2次的走法（除非只剩这些走法）
-    const filteredMoves = moves.filter(move => {
+    // 过滤掉重复超过1次的走法（除非只剩这些走法）
+    const filteredByHistory = moves.filter(move => {
       const moveKey = `${getKey(move.from)}->${getKey(move.to)}`
       const count = aiMoveHistory.value.get(moveKey) || 0
-      return count < 2
+      return count < 1
     })
     
-    // 如果过滤后还有走法，使用过滤后的；否则使用原始走法
-    if (filteredMoves.length > 0) {
-      moves = filteredMoves
+    if (filteredByHistory.length > 0) {
+      moves = filteredByHistory
     }
     
-    // 优先选择移动次数少的棋子（避免一直下一个棋子）
+    // 过滤掉被移动次数过多的棋子（超过2次），除非只剩这些棋子
+    const maxMoveCount = 2
+    const filteredByPiece = moves.filter(move => {
+      const count = aiPieceMoveCount.value.get(getKey(move.from)) || 0
+      return count < maxMoveCount
+    })
+    
+    if (filteredByPiece.length > 0) {
+      moves = filteredByPiece
+    }
+    
+    // 优先选择移动次数最少的棋子
     moves.sort((a, b) => {
       const countA = aiPieceMoveCount.value.get(getKey(a.from)) || 0
       const countB = aiPieceMoveCount.value.get(getKey(b.from)) || 0
@@ -729,15 +743,15 @@ export function useAI(
       return moves[Math.floor(Math.random() * moves.length)]
     }
 
-    // 使用迭代加深搜索
-    return iterativeDeepening(player, config.thinkingTime)
+    // 使用迭代加深搜索（传递过滤和排序后的走法）
+    return iterativeDeepening(player, config.thinkingTime, moves)
   }
 
   // 迭代加深搜索
-  function iterativeDeepening(player: PieceColor, timeLimit: number): Move | null {
+  function iterativeDeepening(player: PieceColor, timeLimit: number, filteredMoves?: Move[]): Move | null {
     const startTime = Date.now()
     let bestMove: Move | null = null
-    const moves = getAllValidMoves(player, board.value)
+    const moves = filteredMoves || getAllValidMoves(player, board.value)
     
     if (moves.length === 0) return null
 

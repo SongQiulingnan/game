@@ -181,27 +181,21 @@ export function useGame() {
                 if (!aiEnabled.value) return
                 if (handleAIRevival()) {
                   recordBoardState()
-                  const next = currentPlayer.value === 'black' ? 'white' : 'black'
                   if (checkWinCondition(currentPlayer.value, board.value, adj, lines)) {
                     gameOver.value = true
                     winner.value = currentPlayer.value
                     return
                   }
-                  // 规则5.2: 敌方>1子但无任何棋子可以移动
-                  if (!hasValidMoves(next, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, next) > 1) {
-                    gameOver.value = true
-                    winner.value = currentPlayer.value
-                    return
-                  }
                   // 如果对手1子无法移动，交给startTurn处理（复活或围困判定）
-                  
+
                   // 检查平局
                   if (checkDraw()) {
                     gameOver.value = true
                     winner.value = null
                     return
                   }
-                  
+
+                  const next = currentPlayer.value === 'black' ? 'white' : 'black'
                   currentPlayer.value = next
                   if (aiEnabled.value) {
                     setTimeout(() => startTurn(), 300)
@@ -247,13 +241,7 @@ export function useGame() {
             return
           }
           const next = aiPlayer.value === 'black' ? 'white' : 'black'
-          // 规则5.2: 敌方>1子但无任何棋子可以移动
-          if (!hasValidMoves(next, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, next) > 1) {
-            gameOver.value = true
-            winner.value = aiPlayer.value
-            return
-          }
-          // 如果对手1子无法移动，交给startTurn处理（复活或围困判定）
+          // 对手1子无法移动交给startTurn处理（复活或围困判定）
           currentPlayer.value = next
           selectedPiece.value = null
           if (aiEnabled.value) {
@@ -261,7 +249,35 @@ export function useGame() {
           }
         } else {
           const next = aiPlayer.value === 'black' ? 'white' : 'black'
-          if (!hasValidMoves(aiPlayer.value, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, aiPlayer.value) > 0) {
+          // AI移动失败，检查是否需要复活（单子被困在主棋盘）
+          const aiCount = countBoardPieces(board.value, aiPlayer.value)
+          if (aiCount === 1 && reserves.value[aiPlayer.value] > 0) {
+            let pos: Point | null = null
+            for (const k in board.value) {
+              if (board.value[k] === aiPlayer.value) {
+                pos = getPointFromKey(k)
+                break
+              }
+            }
+            if (pos && pos.y >= 0) {
+              const hasEmptySpot = MAIN_POINTS.some(p => !board.value[getKey(p)])
+              if (hasEmptySpot) {
+                if (handleAIRevival()) {
+                  recordBoardState()
+                  if (checkWinCondition(aiPlayer.value, board.value, adj, lines)) {
+                    gameOver.value = true
+                    winner.value = aiPlayer.value
+                    return
+                  }
+                  currentPlayer.value = next
+                  startTurn()
+                  return
+                }
+              }
+            }
+          }
+          // 非复活场景：无棋可动判负
+          if (!hasValidMoves(aiPlayer.value, board.value, moveMode.value, adj, lines) && aiCount > 0) {
             gameOver.value = true
             winner.value = next
           }
@@ -295,8 +311,8 @@ export function useGame() {
       }
 
       const next = currentPlayer.value === 'black' ? 'white' : 'black'
-      // 规则5.2: 敌方>1子但无任何棋子可以移动
-      if (!hasValidMoves(next, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, next) > 1) {
+      // 规则5.2: 敌方>1子但无任何棋子可以移动 — 使用 checkWinCondition 统一判定（检查两种模式）
+      if (checkWinCondition(currentPlayer.value, board.value, adj, lines)) {
         gameOver.value = true
         winner.value = currentPlayer.value
         return
@@ -332,10 +348,10 @@ export function useGame() {
       recordBoardState()
 
       executeCapturesWithChain(
-        clicked, 
-        currentPlayer.value, 
-        board.value, 
-        reserves.value, 
+        clicked,
+        currentPlayer.value,
+        board.value,
+        reserves.value,
         lines
       )
 
@@ -346,13 +362,7 @@ export function useGame() {
       }
 
       const next = currentPlayer.value === 'black' ? 'white' : 'black'
-      // 规则5.2: 敌方>1子但无任何棋子可以移动
-      if (!hasValidMoves(next, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, next) > 1) {
-        gameOver.value = true
-        winner.value = currentPlayer.value
-        return
-      }
-      // 如果对手1子无法移动，交给startTurn处理（复活或围困判定）
+      // 对手1子无法移动交给startTurn处理（复活或围困判定）
       currentPlayer.value = next
       selectedPiece.value = null
       startTurn()
@@ -439,30 +449,64 @@ export function useGame() {
     
     if (success) {
       recordBoardState()
-      
-      // 检查胜利条件
+
+      // 检查平局
+      if (checkDraw()) {
+        gameOver.value = true
+        winner.value = null
+        return
+      }
+
+      // 检查胜利条件（统一使用 checkWinCondition，检查两种模式）
       if (checkWinCondition(currentPlayer.value, board.value, adj, lines)) {
         gameOver.value = true
         winner.value = currentPlayer.value
         return
       }
-      
-      // 检查对手是否无棋可动
+
+      // 对手1子无法移动交给 scheduleAiVsAiMove/startTurn 处理复活或围困
       const next = currentPlayer.value === 'black' ? 'white' : 'black'
-      if (!hasValidMoves(next, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, next) > 1) {
-        gameOver.value = true
-        winner.value = currentPlayer.value
-        return
-      }
-      
-      // 切换玩家
       currentPlayer.value = next
       selectedPiece.value = null
       
-      // 继续下一轮
+      // 继续下一轮（startTurn会处理复活逻辑）
       scheduleAiVsAiMove()
     } else {
-      // AI无法移动，检查是否无棋可动
+      // AI无法移动，检查是否需要复活
+      const currentCount = countBoardPieces(board.value, currentPlayer.value)
+      if (currentCount === 1 && reserves.value[currentPlayer.value] > 0) {
+        // 检查是否在主棋盘无法移动（需要复活）
+        let pos: Point | null = null
+        for (const k in board.value) {
+          if (board.value[k] === currentPlayer.value) {
+            pos = getPointFromKey(k)
+            break
+          }
+        }
+        if (pos && pos.y >= 0 && getValidMoves(pos, board.value, moveMode.value, adj, lines).length === 0) {
+          // 触发AI复活
+          const hasEmptySpot = MAIN_POINTS.some(p => !board.value[getKey(p)])
+          if (hasEmptySpot) {
+            // 使用AI复活逻辑
+            aiPlayer.value = currentPlayer.value
+            setAILevel(currentPlayer.value === 'black' ? aiBlackLevel.value : aiWhiteLevel.value)
+            if (handleAIRevival()) {
+              recordBoardState()
+              if (checkWinCondition(currentPlayer.value, board.value, adj, lines)) {
+                gameOver.value = true
+                winner.value = currentPlayer.value
+                return
+              }
+              const nextPlayer = currentPlayer.value === 'black' ? 'white' : 'black'
+              currentPlayer.value = nextPlayer
+              scheduleAiVsAiMove()
+              return
+            }
+          }
+        }
+      }
+
+      // 检查是否无棋可动（非复活场景）
       const next = currentPlayer.value === 'black' ? 'white' : 'black'
       if (!hasValidMoves(currentPlayer.value, board.value, moveMode.value, adj, lines) && countBoardPieces(board.value, currentPlayer.value) > 0) {
         gameOver.value = true

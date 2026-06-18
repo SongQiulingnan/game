@@ -127,73 +127,66 @@ export function checkCapture(
   board: BoardState,
   lines: Point[][]
 ): Capture[] {
+  // 验证 movePoint 位置必须是己方棋子
+  if (board[getKey(movePoint)] !== player) return []
+
   const enemy = player === 'black' ? 'white' : 'black'
   const enemyCount = countBoardPieces(board, enemy)
   const linesThrough = getLinesThroughPoint(movePoint, lines)
   const captures: Capture[] = []
 
+  // 规则：敌方棋子 ≤ 2 时不可被吃（保护复活后的弱势方）
+  // 敌方棋子 > 2 时，夹吃和挑吃均正常执行
+  if (enemyCount <= 2) return []
+
   for (const line of linesThrough) {
+    // 只在长度 >= 3 的线上检查吃子
+    if (line.length < 3) continue
+
     const idx = line.findIndex(pt => pt.x === movePoint.x && pt.y === movePoint.y)
     if (idx === -1) continue
 
-    // 夹吃：敌方棋子数量 > 1 时才能夹吃
-    if (enemyCount > 1) {
-      // 检查左边：己(idx-2)—敌(idx-1)—己(idx)
-      if (idx >= 2) {
-        const mid = line[idx - 1]
-        const far = line[idx - 2]
-        if (board[getKey(mid)] === enemy && board[getKey(far)] === player) {
-          // 检查延长点：只有当延长点在边界内且有敌方棋子时才阻止吃子
-          let blocked = false
-          // 右延长点
-          if (idx + 1 < line.length && board[getKey(line[idx + 1])] === enemy) {
-            blocked = true
-          }
-          // 左延长点
-          if (idx - 3 >= 0 && board[getKey(line[idx - 3])] === enemy) {
-            blocked = true
-          }
-          if (!blocked) captures.push({ type: '夹', points: [mid] })
+    // 夹吃：己(idx-2)—敌(idx-1)—己(idx)
+    // 限制：吃子结构两端延长点必须为空（不能有任何棋子）
+    if (idx >= 2) {
+      const mid = line[idx - 1]
+      const far = line[idx - 2]
+      if (board[getKey(mid)] === enemy && board[getKey(far)] === player) {
+        // 检查左端延长点（idx-3）是否为空
+        const leftExt = idx >= 3 ? line[idx - 3] : null
+        // 检查右端延长点（idx+1）是否为空
+        const rightExt = idx < line.length - 1 ? line[idx + 1] : null
+        const leftClear = !leftExt || !board[getKey(leftExt)]
+        const rightClear = !rightExt || !board[getKey(rightExt)]
+        if (leftClear && rightClear) {
+          captures.push({ type: '夹', points: [mid] })
         }
       }
-      // 检查右边：己(idx)—敌(idx+1)—己(idx+2)
-      if (idx <= line.length - 3) {
-        const mid = line[idx + 1]
-        const far = line[idx + 2]
-        if (board[getKey(mid)] === enemy && board[getKey(far)] === player) {
-          // 检查延长点：只有当延长点在边界内且有敌方棋子时才阻止吃子
-          let blocked = false
-          // 左延长点
-          if (idx - 1 >= 0 && board[getKey(line[idx - 1])] === enemy) {
-            blocked = true
-          }
-          // 右延长点
-          if (idx + 3 < line.length && board[getKey(line[idx + 3])] === enemy) {
-            blocked = true
-          }
-          if (!blocked) captures.push({ type: '夹', points: [mid] })
+    }
+    // 夹吃：己(idx)—敌(idx+1)—己(idx+2)
+    // 限制：吃子结构两端延长点必须为空
+    if (idx <= line.length - 3) {
+      const mid = line[idx + 1]
+      const far = line[idx + 2]
+      if (board[getKey(mid)] === enemy && board[getKey(far)] === player) {
+        // 检查左端延长点（idx-1）是否为空
+        const leftExt = idx > 0 ? line[idx - 1] : null
+        // 检查右端延长点（idx+3）是否为空
+        const rightExt = idx < line.length - 3 ? line[idx + 3] : null
+        const leftClear = !leftExt || !board[getKey(leftExt)]
+        const rightClear = !rightExt || !board[getKey(rightExt)]
+        if (leftClear && rightClear) {
+          captures.push({ type: '夹', points: [mid] })
         }
       }
     }
 
-    // 挑吃：敌方棋子数量 > 2 时才能挑吃
-    if (enemyCount > 2) {
-      if (idx > 0 && idx < line.length - 1) {
-        const left = line[idx - 1]
-        const right = line[idx + 1]
-        if (board[getKey(left)] === enemy && board[getKey(right)] === enemy) {
-          // 检查延长点：只有当延长点在边界内且有敌方棋子时才阻止吃子
-          let blocked = false
-          // 左延长点
-          if (idx - 2 >= 0 && board[getKey(line[idx - 2])] === enemy) {
-            blocked = true
-          }
-          // 右延长点
-          if (idx + 2 < line.length && board[getKey(line[idx + 2])] === enemy) {
-            blocked = true
-          }
-          if (!blocked) captures.push({ type: '挑', points: [left, right] })
-        }
+    // 挑吃：敌(idx-1)—己(idx)—敌(idx+1)
+    if (idx > 0 && idx < line.length - 1) {
+      const left = line[idx - 1]
+      const right = line[idx + 1]
+      if (board[getKey(left)] === enemy && board[getKey(right)] === enemy) {
+        captures.push({ type: '挑', points: [left, right] })
       }
     }
   }
@@ -236,6 +229,7 @@ export function executeCapturesWithChain(
   let safetyCounter = 0
   const MAX_CHAIN = 50
 
+  // 只检查移动落点（己方棋子位置）
   let positionsToCheck: Point[] = [movePoint]
 
   while (positionsToCheck.length > 0 && safetyCounter < MAX_CHAIN) {
@@ -244,6 +238,9 @@ export function executeCapturesWithChain(
     const nextPositionsToCheck: Point[] = []
     
     for (const pos of positionsToCheck) {
+      // 确保该位置有己方棋子
+      if (board[getKey(pos)] !== player) continue
+      
       const captures = checkCapture(pos, player, board, lines)
       if (captures.length === 0) continue
 
@@ -266,6 +263,7 @@ export function executeCapturesWithChain(
       reserves[player] -= unique.length
       totalCaptured += unique.length
 
+      // 检查新补位的棋子是否能继续吃子
       for (const pt of unique) {
         const newCaptures = checkCapture(pt, player, board, lines)
         if (newCaptures.length > 0) {
@@ -328,38 +326,71 @@ export function getCaptureThreats(
 ): { type: '夹', points: Point[], score: number }[] {
   const threats: { type: '夹', points: Point[], score: number }[] = []
   const enemy = player === 'black' ? 'white' : 'black'
-  
-  // 遍历所有线条
+
+  // 敌方 ≤ 2 子时不可吃，无需检测威胁
+  if (countBoardPieces(stateBoard, enemy) <= 2) return []
+
+  // 遍历所有线条，检测"一子落成夹"的威胁模式
   for (const line of lines) {
-    for (let i = 1; i < line.length - 1; i++) {
-      const prev = line[i - 1]
+    if (line.length < 3) continue
+
+    for (let i = 0; i < line.length; i++) {
       const curr = line[i]
-      const next = line[i + 1]
-      
-      // 检查 己-空-敌 模式
-      if (stateBoard[getKey(prev)] === player && 
-          !stateBoard[getKey(curr)] && 
-          stateBoard[getKey(next)] === enemy) {
-        threats.push({
-          type: '夹',
-          points: [curr],
-          score: 200
-        })
+
+      // 模式1: 己(i) — 空(i+1) — 敌(i+2)
+      // 若己方有子可移至 i+1 则形成夹吃，需满足：己(i)-敌(i+2)-己(i+1)
+      // 延长点约束：i-1（左端）和 i+3（右端）必须为空
+      if (i + 2 < line.length) {
+        const n1 = line[i + 1]
+        const n2 = line[i + 2]
+        if (
+          stateBoard[getKey(curr)] === player &&
+          !stateBoard[getKey(n1)] &&
+          stateBoard[getKey(n2)] === enemy
+        ) {
+          // 夹吃结构将是: 己(curr)-敌(n2)-己(n1)，延长点: i-1 和 i+3
+          const leftExt = i > 0 ? line[i - 1] : null
+          const rightExt = i + 3 < line.length ? line[i + 3] : null
+          const leftClear = !leftExt || !stateBoard[getKey(leftExt)]
+          const rightClear = !rightExt || !stateBoard[getKey(rightExt)]
+          if (leftClear && rightClear) {
+            threats.push({
+              type: '夹',
+              points: [n1],
+              score: 200,
+            })
+          }
+        }
       }
-      
-      // 检查 敌-空-己 模式
-      if (stateBoard[getKey(prev)] === enemy && 
-          !stateBoard[getKey(curr)] && 
-          stateBoard[getKey(next)] === player) {
-        threats.push({
-          type: '夹',
-          points: [curr],
-          score: 200
-        })
+
+      // 模式2: 敌(i) — 空(i+1) — 己(i+2)
+      // 若己方有子可移至 i+1 则形成夹吃，需满足：己(i+1)-敌(i)-己(i+2)
+      // 延长点约束：i-1（左端）和 i+3（右端）必须为空
+      if (i + 2 < line.length) {
+        const n1 = line[i + 1]
+        const n2 = line[i + 2]
+        if (
+          stateBoard[getKey(curr)] === enemy &&
+          !stateBoard[getKey(n1)] &&
+          stateBoard[getKey(n2)] === player
+        ) {
+          // 夹吃结构将是: 己(n1)-敌(curr)-己(n2)，延长点: i-1 和 i+3
+          const leftExt = i > 0 ? line[i - 1] : null
+          const rightExt = i + 3 < line.length ? line[i + 3] : null
+          const leftClear = !leftExt || !stateBoard[getKey(leftExt)]
+          const rightClear = !rightExt || !stateBoard[getKey(rightExt)]
+          if (leftClear && rightClear) {
+            threats.push({
+              type: '夹',
+              points: [n1],
+              score: 200,
+            })
+          }
+        }
       }
     }
   }
-  
+
   return threats
 }
 
@@ -372,7 +403,10 @@ export function getPickThreats(
 ): { type: '挑', points: Point[], score: number }[] {
   const threats: { type: '挑', points: Point[], score: number }[] = []
   const enemy = player === 'black' ? 'white' : 'black'
-  
+
+  // 敌方 ≤ 2 子时不可吃，无需检测威胁
+  if (countBoardPieces(stateBoard, enemy) <= 2) return []
+
   // 遍历所有线条
   for (const line of lines) {
     for (let i = 1; i < line.length - 1; i++) {
