@@ -15,6 +15,12 @@
       </button>
     </div>
     <div class="controls-row">
+      <button class="btn btn-online" @click="actions.enterOnlineMode">
+        <span class="btn-icon">🌐</span>
+        <span>联机对战</span>
+      </button>
+    </div>
+    <div class="controls-row">
       <button class="btn btn-accent" @click="actions.toggleAI">
         <span class="btn-icon">🤖</span>
         <span>{{ aiEnabled ? '关闭AI' : '开启AI' }}</span>
@@ -143,6 +149,7 @@ interface Props {
     setAiBlackLevel: (level: AILevel) => void
     setAiWhiteLevel: (level: AILevel) => void
     setAiVsAiSpeed: (speed: number) => void
+    enterOnlineMode: () => void
   }
 }
 
@@ -174,6 +181,17 @@ const speeds = [
   width: 100%;
   max-width: 560px;
   padding: 0 8px;
+}
+
+.btn-online {
+  background: linear-gradient(135deg, #6b46c1, #553c9a);
+  color: white;
+  box-shadow: 0 2px 4px rgba(107, 70, 193, 0.3);
+}
+
+.btn-online:hover {
+  background: linear-gradient(135deg, #805ad5, #6b46c1);
+  box-shadow: 0 4px 8px rgba(107, 70, 193, 0.4);
 }
 
 .btn-success {

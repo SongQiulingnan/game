@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import type { PieceColor, BoardState, Point, MoveMode, Reserves, AILevel } from '../types'
+import type { PieceColor, BoardState, Point, MoveMode, Reserves, AILevel, GameStateData, Move } from '../types'
 import { ALL_POINTS, MAIN_POINTS } from '../utils/constants'
 import {
   getKey,
@@ -27,7 +27,7 @@ export function useGame() {
   const winner = ref<PieceColor | null>(null)
   const moveMode = ref<MoveMode>('single')
   const revivalMode = ref(false)
-  
+
   // 防止死循环：记录棋盘历史状态
   const boardHistory = ref<string[]>([])
   const moveCount = ref(0)
@@ -39,6 +39,20 @@ export function useGame() {
   const aiVsAiTimer = ref<ReturnType<typeof setTimeout> | null>(null)
   const aiBlackLevel = ref<AILevel>(4) // 黑方AI等级
   const aiWhiteLevel = ref<AILevel>(6) // 白方AI等级
+
+  // 联机模式
+  const onlineMode = ref(false)
+  const isMyTurn = ref(true)
+  const myColor = ref<PieceColor>('black')
+
+  // 网络回调（依赖注入，避免循环引用）
+  const networkCallbacks: {
+    onMoveMade: ((move: Move) => void) | null
+    onRevivalMade: ((point: Point) => void) | null
+  } = {
+    onMoveMade: null,
+    onRevivalMade: null,
+  }
 
   // AI逻辑
   const {
@@ -146,6 +160,15 @@ export function useGame() {
 
   function startTurn() {
     if (gameOver.value) return
+
+    // 联机模式：不是我的回合则等待网络消息
+    if (onlineMode.value && currentPlayer.value !== myColor.value) {
+      isMyTurn.value = false
+      return
+    }
+    if (onlineMode.value) {
+      isMyTurn.value = true
+    }
 
     // 检查平局
     if (checkDraw()) {
@@ -293,6 +316,7 @@ export function useGame() {
 
   function handleBoardClick(clicked: Point) {
     if (gameOver.value || aiThinking.value) return
+    if (onlineMode.value && !isMyTurn.value) return
 
     const k = getKey(clicked)
     const piece = board.value[k]
@@ -365,6 +389,16 @@ export function useGame() {
       // 对手1子无法移动交给startTurn处理（复活或围困判定）
       currentPlayer.value = next
       selectedPiece.value = null
+
+      // 联机模式：发送走法到服务端
+      if (onlineMode.value && networkCallbacks.onMoveMade) {
+        const selPiece = selectedPiece.value
+        if (selPiece) {
+          networkCallbacks.onMoveMade({ from: selPiece, to: clicked })
+        }
+        return
+      }
+
       startTurn()
       return
     } else {
@@ -545,6 +579,48 @@ export function useGame() {
     setAILevel(level)
   }
 
+  // ===== 联机模式方法 =====
+
+  function applyRemoteState(state: GameStateData & { yourColor: PieceColor }) {
+    board.value = { ...state.board }
+    reserves.value = { ...state.reserves }
+    currentPlayer.value = state.currentPlayer
+    moveMode.value = state.moveMode
+    revivalMode.value = state.revivalMode
+    gameOver.value = state.gameOver
+    winner.value = state.winner
+    selectedPiece.value = null
+    isMyTurn.value = state.currentPlayer === state.yourColor
+    myColor.value = state.yourColor
+  }
+
+  function setOnlinePlayer(color: PieceColor) {
+    myColor.value = color
+  }
+
+  function enterOnlineMode() {
+    onlineMode.value = true
+    aiEnabled.value = false
+    aiVsAiMode.value = false
+    if (aiVsAiTimer.value) {
+      clearTimeout(aiVsAiTimer.value)
+      aiVsAiTimer.value = null
+    }
+  }
+
+  function exitOnlineMode() {
+    onlineMode.value = false
+    initGame()
+  }
+
+  function setNetworkCallbacks(callbacks: {
+    onMoveMade: (move: Move) => void
+    onRevivalMade: (point: Point) => void
+  }) {
+    networkCallbacks.onMoveMade = callbacks.onMoveMade
+    networkCallbacks.onRevivalMade = callbacks.onRevivalMade
+  }
+
   const currentAIConfig = computed(() => AI_LEVELS[aiLevel.value])
 
   // 初始化游戏
@@ -565,13 +641,23 @@ export function useGame() {
     aiLevel,
     aiDepth,
     aiThinking,
-    
+
     // AI 对弈模式
     aiVsAiMode,
     aiVsAiSpeed,
     aiBlackLevel,
     aiWhiteLevel,
-    
+
+    // 联机模式
+    onlineMode,
+    isMyTurn,
+    myColor,
+    applyRemoteState,
+    setOnlinePlayer,
+    enterOnlineMode,
+    exitOnlineMode,
+    setNetworkCallbacks,
+
     // 计算属性
     blackBoardCount,
     whiteBoardCount,
@@ -580,7 +666,7 @@ export function useGame() {
     modeText,
     modeButtonText,
     currentAIConfig,
-    
+
     // 方法
     initGame,
     toggleMoveMode,
@@ -593,7 +679,7 @@ export function useGame() {
     setAiBlackLevel,
     setAiWhiteLevel,
     setAiVsAiSpeed,
-    
+
     // 棋盘数据
     adj,
     lines,

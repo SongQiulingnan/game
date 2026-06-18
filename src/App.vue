@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useGame } from './composables/useGame'
+import { useNetwork } from './composables/useNetwork'
 import Board from './components/Board.vue'
 import Controls from './components/Controls.vue'
 import InfoPanel from './components/InfoPanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import RulesBox from './components/RulesBox.vue'
+import LobbyPanel from './components/LobbyPanel.vue'
 
 const {
   board,
@@ -22,6 +24,7 @@ const {
   aiVsAiSpeed,
   aiBlackLevel,
   aiWhiteLevel,
+  onlineMode,
   blackBoardCount,
   whiteBoardCount,
   statusText,
@@ -39,17 +42,77 @@ const {
   setAiBlackLevel,
   setAiWhiteLevel,
   setAiVsAiSpeed,
+  enterOnlineMode,
+  exitOnlineMode,
+  applyRemoteState,
+  setOnlinePlayer,
+  setNetworkCallbacks,
   adj,
   lines,
   allPoints,
   AI_LEVELS,
 } = useGame()
 
+const network = useNetwork()
+
+// 绑定网络层 → 游戏层
+network.onGameState((state) => {
+  applyRemoteState(state)
+})
+
+// 绑定游戏层 → 网络层
+setNetworkCallbacks({
+  onMoveMade: (move) => network.sendMove(move),
+  onRevivalMade: (point) => network.sendRevival(point),
+})
+
 const showRules = ref(false)
+const showLobby = ref(false)
+const creatingRoom = ref(false)
 
 function toggleRules() {
   showRules.value = !showRules.value
 }
+
+function handleEnterOnlineMode() {
+  showLobby.value = true
+  network.connect()
+}
+
+function handleCreateRoom() {
+  creatingRoom.value = true
+  network.createRoom()
+}
+
+function handleJoinRoom(code: string) {
+  network.joinRoom(code)
+}
+
+function handleLeaveRoom() {
+  network.leaveRoom()
+  showLobby.value = false
+  creatingRoom.value = false
+  exitOnlineMode()
+}
+
+function handleCloseLobby() {
+  // 如果游戏已开始，不允许关闭
+  if (network.networkState.value === 'playing') return
+  handleLeaveRoom()
+}
+
+// 监听网络状态变化，进入游戏时启用联机模式
+import { watch } from 'vue'
+watch(
+  () => network.networkState.value,
+  (state) => {
+    if (state === 'playing') {
+      enterOnlineMode()
+      showLobby.value = false
+      creatingRoom.value = false
+    }
+  }
+)
 </script>
 
 <template>
@@ -58,7 +121,7 @@ function toggleRules() {
       <h1 class="game-title">挑夹棋</h1>
       <p class="game-subtitle">传统民间棋类游戏</p>
     </header>
-    
+
     <main class="game-main">
       <div class="game-container">
         <Board
@@ -74,20 +137,20 @@ function toggleRules() {
           @select="handleBoardClick"
         />
       </div>
-      
+
       <div class="game-sidebar">
         <StatusBar
           :status-text="statusText"
           :status-color="statusColor"
           :mode-text="modeText"
         />
-        
+
         <InfoPanel
           :reserves="reserves"
           :black-board-count="blackBoardCount"
           :white-board-count="whiteBoardCount"
         />
-        
+
         <Controls
           :mode-button-text="modeButtonText"
           :ai-enabled="aiEnabled"
@@ -109,13 +172,27 @@ function toggleRules() {
             toggleAiVsAi: toggleAiVsAi,
             setAiBlackLevel: setAiBlackLevel,
             setAiWhiteLevel: setAiWhiteLevel,
-            setAiVsAiSpeed: setAiVsAiSpeed
+            setAiVsAiSpeed: setAiVsAiSpeed,
+            enterOnlineMode: handleEnterOnlineMode,
           }"
         />
       </div>
     </main>
-    
+
     <RulesBox :show="showRules" @close="toggleRules" />
+
+    <!-- 联机大厅 -->
+    <LobbyPanel
+      v-if="showLobby"
+      :network-state="network.networkState.value"
+      :room-code="network.roomCode.value"
+      :error-message="network.errorMessage.value"
+      :creating="creatingRoom"
+      @close="handleCloseLobby"
+      @create-room="handleCreateRoom"
+      @join-room="handleJoinRoom"
+      @leave-room="handleLeaveRoom"
+    />
   </div>
 </template>
 
@@ -203,22 +280,22 @@ body {
     padding: 24px;
     gap: 24px;
   }
-  
+
   .game-title {
     font-size: 36px;
   }
-  
+
   .game-main {
     flex-direction: row;
     align-items: flex-start;
     gap: 24px;
   }
-  
+
   .game-container {
     flex-shrink: 0;
     width: auto;
   }
-  
+
   .game-sidebar {
     flex: 1;
     min-width: 280px;
@@ -232,16 +309,16 @@ body {
     padding: 12px;
     gap: 12px;
   }
-  
+
   .game-title {
     font-size: 24px;
     letter-spacing: 2px;
   }
-  
+
   .game-subtitle {
     font-size: 12px;
   }
-  
+
   .game-container {
     padding: 12px;
     border-radius: 12px;
